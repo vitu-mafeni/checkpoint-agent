@@ -8,3 +8,6 @@ The following are the environment variables required:
 - MINIO_SECRET_KEY
 - MINIO_BUCKET
 - PULL_INTERVAL
+
+
+---
