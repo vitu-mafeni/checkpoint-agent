@@ -1,20 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -22,7 +23,36 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"net"
+	"runtime"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 )
+
+type HeartbeatPayload struct {
+	Node      string  `json:"node"`
+	IPAddress string  `json:"ip"`
+	OS        string  `json:"os"`
+	Arch      string  `json:"arch"`
+	CPUs      int     `json:"cpus"`
+	CPUUsage  float64 `json:"cpu_usage_percent"`
+	MemTotal  uint64  `json:"mem_total_bytes"`
+	MemUsed   uint64  `json:"mem_used_bytes"`
+	TS        int64   `json:"ts"`
+
+	// From node annotations
+	ClusterName string `json:"cluster_name,omitempty"`
+	ClusterNS   string `json:"cluster_namespace,omitempty"`
+	Machine     string `json:"machine,omitempty"`
+	OwnerKind   string `json:"owner_kind,omitempty"`
+	OwnerName   string `json:"owner_name,omitempty"`
+	ProvidedIP  string `json:"provided_node_ip,omitempty"`
+	CRISocket   string `json:"cri_socket,omitempty"`
+}
 
 func getenv(key, defaultVal string) string {
 	if v := os.Getenv(key); v != "" {
@@ -72,6 +102,7 @@ func main() {
 	minioSecret := getenv("MINIO_SECRET_KEY", "secret1234")
 	minioBucket := getenv("MINIO_BUCKET", "checkpoints")
 	pullInterval := getenvDuration("PULL_INTERVAL", 1*time.Minute)
+	controllerUrl := getenv("CONTROLLER_URL", "http://192.168.28.111:30351/heartbeat")
 
 	// clientset, err := GetKubeClient()
 	// if err != nil {
@@ -104,6 +135,8 @@ func main() {
 			log.Fatalf("Failed to create bucket: %v", err)
 		}
 	}
+
+	go heartbeatBlock(controllerUrl)
 
 	// Upload existing files on startup
 	files, err := os.ReadDir(checkpointDir)
@@ -246,6 +279,7 @@ func syncFromMinio(ctx context.Context, client *minio.Client, bucket, checkpoint
 }
 
 // CreateRestorePod creates a pod that restores a container from a checkpoint
+/*
 func CreateRestorePod(
 	clientset *kubernetes.Clientset,
 	namespace, podName, checkpointFile string,
@@ -305,8 +339,11 @@ func CreateRestorePod(
 	return createdPod, nil
 }
 
+*/
+
 func ptrBool(b bool) *bool { return &b }
 
+/*
 func CreateRestorePod2(
 	clientset *kubernetes.Clientset,
 	namespace, podName, originalImage, checkpointFile string,
@@ -433,6 +470,7 @@ tail -f /dev/null
 
 	return createdPod, nil
 }
+*/
 
 // GetKubeClient initializes a Kubernetes client.
 // - Inside a pod: uses in-cluster config
@@ -561,4 +599,145 @@ func waitForCompleteFile(filePath string, stableFor time.Duration, checkInterval
 
 		time.Sleep(checkInterval)
 	}
+}
+
+// this is is for sending heartbeat to management cluster
+func heartbeatBlock(controllerURL string) {
+	// controllerURL := os.Getenv("CONTROLLER_URL") // e.g. http://heartbeat-controller.kube-system:8090/heartbeat
+	if controllerURL == "" {
+		log.Fatal("CONTROLLER_URL not set")
+	}
+	interval := 5 * time.Second
+
+	nodeName, err := os.Hostname()
+	if err != nil {
+		log.Fatalf("cannot get hostname: %v", err)
+	}
+	nodeIP := getNodeIP()
+
+	clientset, _ := GetKubeClient()
+	node, _ := clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	// labels := node.Labels
+	capacity := node.Status.Capacity
+	nodeName = node.Name
+	nodeIP = node.Status.Addresses[0].Address
+	// if ip, ok := labels["kubernetes.io/hostname"]; ok {
+	// 	nodeIP = ip
+	// }
+	// if ip, ok := labels["kubeadm.alpha.kubernetes.io/cri-socket"]; ok {
+	// 	nodeIP = ip
+	// }
+	// if ip, ok := labels["node.kubernetes.io/instance-type"]; ok {
+	// 	nodeIP = ip
+	// }
+	// if ip, ok := labels["topology.kubernetes.io/region"]; ok {
+	// 	nodeIP = ip
+	// }
+	// if ip, ok := labels["topology.kubernetes.io/zone"]; ok {
+	// 	nodeIP = ip
+	// }
+	if ip, ok := capacity["cpu"]; ok {
+		cpuCount, _ := ip.AsInt64()
+		log.Printf("Node CPU count: %d", cpuCount)
+	}
+	if ip, ok := capacity["memory"]; ok {
+		memBytes, _ := ip.AsInt64()
+		log.Printf("Node Memory: %d bytes", memBytes)
+	}
+
+	log.Printf("Heartbeat client started for node: %s (%s)", nodeName, nodeIP)
+
+	annotations := node.Annotations
+
+	clusterName := annotations["cluster.x-k8s.io/cluster-name"]
+	clusterNS := annotations["cluster.x-k8s.io/cluster-namespace"]
+	machine := annotations["cluster.x-k8s.io/machine"]
+	ownerKind := annotations["cluster.x-k8s.io/owner-kind"]
+	ownerName := annotations["cluster.x-k8s.io/owner-name"]
+	providedIP := annotations["alpha.kubernetes.io/provided-node-ip"]
+	criSocket := annotations["kubeadm.alpha.kubernetes.io/cri-socket"]
+
+	//if nodeIP is empty, use providedIP
+	if nodeIP == "" && providedIP != "" {
+		nodeIP = providedIP
+	}
+
+	log.Printf("Cluster: %s/%s, Machine: %s, Owner: %s/%s, ProvidedIP: %s, CRISocket: %s",
+		clusterNS, clusterName, machine, ownerKind, ownerName, providedIP, criSocket)
+
+	for {
+		// Collect system info
+		vmStat, _ := mem.VirtualMemory()
+		cpuPercent, _ := cpu.Percent(0, false)
+
+		hb := HeartbeatPayload{
+			Node:      nodeName,
+			IPAddress: nodeIP,
+			OS:        runtime.GOOS,
+			Arch:      runtime.GOARCH,
+			CPUs:      runtime.NumCPU(),
+			CPUUsage:  round(cpuPercent[0], 2),
+			MemTotal:  vmStat.Total,
+			MemUsed:   vmStat.Used,
+			TS:        time.Now().Unix(),
+
+			ClusterName: clusterName,
+			ClusterNS:   clusterNS,
+			Machine:     machine,
+			OwnerKind:   ownerKind,
+			OwnerName:   ownerName,
+			ProvidedIP:  providedIP,
+			CRISocket:   criSocket,
+		}
+
+		data, _ := json.Marshal(hb)
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Post(controllerURL, "application/json", bytes.NewBuffer(data))
+		if err != nil {
+			log.Printf("failed to send heartbeat: %v", err)
+		} else {
+			resp.Body.Close()
+			log.Printf("heartbeat sent: %s %s", hb.Node, hb.IPAddress)
+		}
+
+		time.Sleep(interval)
+	}
+}
+
+func round(val float64, places int) float64 {
+	ratio := 1.0
+	for i := 0; i < places; i++ {
+		ratio *= 10
+	}
+	return float64(int(val*ratio+0.5)) / ratio
+}
+
+// getNodeIP finds a non-loopback IPv4 address
+func getNodeIP() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "unknown"
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				return ipv4.String()
+			}
+		}
+	}
+	return "unknown"
 }
