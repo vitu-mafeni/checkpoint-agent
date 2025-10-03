@@ -636,12 +636,12 @@ func heartbeatBlock(controllerURL string) {
 			// safe access: capacity may be empty but that's okay
 			capacity := node.Status.Capacity
 			if cpuQty, ok := capacity["cpu"]; ok {
-				if cpuCount, err2 := cpuQty.AsInt64(); err2 == false {
+				if cpuCount, err2 := cpuQty.AsInt64(); !err2 {
 					log.Printf("Node CPU count: %d", cpuCount)
 				}
 			}
 			if memQty, ok := capacity["memory"]; ok {
-				if memBytes, err2 := memQty.AsInt64(); err2 == false {
+				if memBytes, err2 := memQty.AsInt64(); !err2 {
 					log.Printf("Node Memory: %d bytes", memBytes)
 				}
 			}
