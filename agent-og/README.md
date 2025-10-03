@@ -11,3 +11,18 @@ The following are the environment variables required:
 
 
 ---
+
+examples
+export PATH=$PATH:/usr/local/go/bin
+
+# MinIO client and checkpoint settings
+export CHECKPOINT_DIR=/var/lib/kubelet/checkpoints
+export MINIO_ENDPOINT=192.168.28.111:30350
+export MINIO_ACCESS_KEY=nephio1234
+export MINIO_SECRET_KEY=secret1234
+export MINIO_BUCKET=checkpoints
+export PULL_INTERVAL=5s
+
+# fault detection client settings
+export CONTROLLER_URL=http://192.168.28.111:8090/heartbeat
+export FAULT_DETECTION_INTERVAL=10s
