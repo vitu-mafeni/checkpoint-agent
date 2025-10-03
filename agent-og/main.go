@@ -602,8 +602,8 @@ func waitForCompleteFile(filePath string, stableFor time.Duration, checkInterval
 }
 
 // this is is for sending heartbeat to management cluster
+// heartbeatBlock sends heartbeat to management cluster with safer error handling.
 func heartbeatBlock(controllerURL string) {
-	// controllerURL := os.Getenv("CONTROLLER_URL") // e.g. http://heartbeat-controller.kube-system:8090/heartbeat
 	if controllerURL == "" {
 		log.Fatal("CONTROLLER_URL not set")
 	}
@@ -615,60 +615,85 @@ func heartbeatBlock(controllerURL string) {
 	}
 	nodeIP := getNodeIP()
 
-	clientset, _ := GetKubeClient()
-	node, _ := clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
-	// labels := node.Labels
-	capacity := node.Status.Capacity
-	nodeName = node.Name
-	nodeIP = node.Status.Addresses[0].Address
-	// if ip, ok := labels["kubernetes.io/hostname"]; ok {
-	// 	nodeIP = ip
-	// }
-	// if ip, ok := labels["kubeadm.alpha.kubernetes.io/cri-socket"]; ok {
-	// 	nodeIP = ip
-	// }
-	// if ip, ok := labels["node.kubernetes.io/instance-type"]; ok {
-	// 	nodeIP = ip
-	// }
-	// if ip, ok := labels["topology.kubernetes.io/region"]; ok {
-	// 	nodeIP = ip
-	// }
-	// if ip, ok := labels["topology.kubernetes.io/zone"]; ok {
-	// 	nodeIP = ip
-	// }
-	if ip, ok := capacity["cpu"]; ok {
-		cpuCount, _ := ip.AsInt64()
-		log.Printf("Node CPU count: %d", cpuCount)
+	// Attempt to create Kubernetes client
+	clientset, err := GetKubeClient()
+	if err != nil {
+		// If no kube client available, log and continue with basic info only.
+		log.Printf("warning: failed to initialize Kubernetes client: %v", err)
+	} else {
+		log.Printf("kubernetes client initialized")
 	}
-	if ip, ok := capacity["memory"]; ok {
-		memBytes, _ := ip.AsInt64()
-		log.Printf("Node Memory: %d bytes", memBytes)
+
+	// Try to read node info from k8s only if clientset is non-nil
+	var (
+		clusterName, clusterNS, machine, ownerKind, ownerName, providedIP, criSocket string
+	)
+	if clientset != nil {
+		node, err := clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			log.Printf("warning: failed to get Node %q from API: %v", nodeName, err)
+		} else if node != nil {
+			// safe access: capacity may be empty but that's okay
+			capacity := node.Status.Capacity
+			if cpuQty, ok := capacity["cpu"]; ok {
+				if cpuCount, err2 := cpuQty.AsInt64(); err2 == false {
+					log.Printf("Node CPU count: %d", cpuCount)
+				}
+			}
+			if memQty, ok := capacity["memory"]; ok {
+				if memBytes, err2 := memQty.AsInt64(); err2 == false {
+					log.Printf("Node Memory: %d bytes", memBytes)
+				}
+			}
+
+			// overwrite nodeName and nodeIP based on API values if available
+			if node.Name != "" {
+				nodeName = node.Name
+			}
+			if len(node.Status.Addresses) > 0 {
+				// pick first non-empty address (guarded)
+				for _, a := range node.Status.Addresses {
+					if a.Address != "" {
+						nodeIP = a.Address
+						break
+					}
+				}
+			}
+
+			annotations := node.Annotations // reading nil map is safe (returns nil)
+			clusterName = annotations["cluster.x-k8s.io/cluster-name"]
+			clusterNS = annotations["cluster.x-k8s.io/cluster-namespace"]
+			machine = annotations["cluster.x-k8s.io/machine"]
+			ownerKind = annotations["cluster.x-k8s.io/owner-kind"]
+			ownerName = annotations["cluster.x-k8s.io/owner-name"]
+			providedIP = annotations["alpha.kubernetes.io/provided-node-ip"]
+			criSocket = annotations["kubeadm.alpha.kubernetes.io/cri-socket"]
+
+			// fallback: if nodeIP still empty, use providedIP
+			if nodeIP == "" && providedIP != "" {
+				nodeIP = providedIP
+			}
+		}
 	}
 
 	log.Printf("Heartbeat client started for node: %s (%s)", nodeName, nodeIP)
-
-	annotations := node.Annotations
-
-	clusterName := annotations["cluster.x-k8s.io/cluster-name"]
-	clusterNS := annotations["cluster.x-k8s.io/cluster-namespace"]
-	machine := annotations["cluster.x-k8s.io/machine"]
-	ownerKind := annotations["cluster.x-k8s.io/owner-kind"]
-	ownerName := annotations["cluster.x-k8s.io/owner-name"]
-	providedIP := annotations["alpha.kubernetes.io/provided-node-ip"]
-	criSocket := annotations["kubeadm.alpha.kubernetes.io/cri-socket"]
-
-	//if nodeIP is empty, use providedIP
-	if nodeIP == "" && providedIP != "" {
-		nodeIP = providedIP
-	}
-
 	log.Printf("Cluster: %s/%s, Machine: %s, Owner: %s/%s, ProvidedIP: %s, CRISocket: %s",
 		clusterNS, clusterName, machine, ownerKind, ownerName, providedIP, criSocket)
 
 	for {
-		// Collect system info
-		vmStat, _ := mem.VirtualMemory()
-		cpuPercent, _ := cpu.Percent(0, false)
+		// Collect system info (handle errors)
+		vmStat, memErr := mem.VirtualMemory()
+		if memErr != nil {
+			log.Printf("warning: failed to read memory stats: %v", memErr)
+			// keep zero values if mem failed
+		}
+		cpuPercent, cpuErr := cpu.Percent(0, false)
+		cpuUsage := 0.0
+		if cpuErr != nil {
+			log.Printf("warning: failed to read cpu percent: %v", cpuErr)
+		} else if len(cpuPercent) > 0 {
+			cpuUsage = cpuPercent[0]
+		}
 
 		hb := HeartbeatPayload{
 			Node:      nodeName,
@@ -676,7 +701,7 @@ func heartbeatBlock(controllerURL string) {
 			OS:        runtime.GOOS,
 			Arch:      runtime.GOARCH,
 			CPUs:      runtime.NumCPU(),
-			CPUUsage:  round(cpuPercent[0], 2),
+			CPUUsage:  round(cpuUsage, 2),
 			MemTotal:  vmStat.Total,
 			MemUsed:   vmStat.Used,
 			TS:        time.Now().Unix(),
