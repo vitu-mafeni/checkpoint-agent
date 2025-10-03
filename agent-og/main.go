@@ -669,6 +669,11 @@ func heartbeatBlock(controllerURL string) {
 			providedIP = annotations["alpha.kubernetes.io/provided-node-ip"]
 			criSocket = annotations["kubeadm.alpha.kubernetes.io/cri-socket"]
 
+			fmt.Printf("Annotations:\n")
+			for k, v := range node.Annotations {
+				fmt.Printf("%s: %s\n", k, v)
+			}
+
 			// fallback: if nodeIP still empty, use providedIP
 			if nodeIP == "" && providedIP != "" {
 				nodeIP = providedIP
@@ -722,7 +727,7 @@ func heartbeatBlock(controllerURL string) {
 			log.Printf("failed to send heartbeat: %v", err)
 		} else {
 			resp.Body.Close()
-			log.Printf("heartbeat sent: %s %s", hb.Node, hb.IPAddress)
+			log.Printf("heartbeat sent: %s %s", hb.Node, hb.IPAddress, hb.ClusterName)
 		}
 
 		time.Sleep(interval)
