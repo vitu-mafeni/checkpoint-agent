@@ -1,3 +1,5 @@
+
+
 # checkpoint-agent
 This is checkpoint-agent for the transitional operator to run on each worker node of workload clusters. This watches the configured checkpoint paths and uploads to an s3 storage engine e.g Minio
 
@@ -26,3 +28,6 @@ export PULL_INTERVAL=5s
 # fault detection client settings
 export CONTROLLER_URL=http://47.129.115.173:8090/heartbeat
 export FAULT_DETECTION_INTERVAL=10s
+
+
+Please check full access guide and intergrating with the transition operator USER-GUIDE file [HERE](https://github.com/vitu-mafeni/transition-operator/blob/main/USER-GUIDE.md)
