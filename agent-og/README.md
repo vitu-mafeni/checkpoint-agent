@@ -14,20 +14,21 @@ The following are the environment variables required:
 
 ---
 
-examples
-export PATH=$PATH:/usr/local/go/bin
-
 # MinIO client and checkpoint settings
 export CHECKPOINT_DIR=/var/lib/kubelet/checkpoints
-export MINIO_ENDPOINT=47.129.115.173:31092
+export MINIO_ENDPOINT=52.221.201.236:32757
 export MINIO_ACCESS_KEY=nephio1234
 export MINIO_SECRET_KEY=secret1234
 export MINIO_BUCKET=checkpoints
 export PULL_INTERVAL=5s
 
-# fault detection client settings
-export CONTROLLER_URL=http://47.129.115.173:8090/heartbeat
-export FAULT_DETECTION_INTERVAL=10s
+# Only applies for AWS clusters
+export AWS_REGION=ap-southeast-1
+
+# Fault detection client settings
+export CONTROLLER_URL=http://52.221.201.236:8090/heartbeat
+export FAULT_DETECTION_INTERVAL=5s
+
 
 
 Please check full access guide and intergrating with the transition operator USER-GUIDE file [HERE](https://github.com/vitu-mafeni/transition-operator/blob/main/USER-GUIDE.md)

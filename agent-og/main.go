@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -103,6 +104,7 @@ func main() {
 	minioBucket := getenv("MINIO_BUCKET", "checkpoints")
 	pullInterval := getenvDuration("PULL_INTERVAL", 1*time.Minute)
 	controllerUrl := getenv("CONTROLLER_URL", "http://192.168.28.111:30351/heartbeat")
+	aws_region := getenv("AWS_REGION", "")
 
 	// clientset, err := GetKubeClient()
 	// if err != nil {
@@ -136,7 +138,7 @@ func main() {
 		}
 	}
 
-	go heartbeatBlock(controllerUrl)
+	go heartbeatBlock(controllerUrl, aws_region)
 
 	// Upload existing files on startup
 	files, err := os.ReadDir(checkpointDir)
@@ -603,11 +605,11 @@ func waitForCompleteFile(filePath string, stableFor time.Duration, checkInterval
 
 // this is is for sending heartbeat to management cluster
 // heartbeatBlock sends heartbeat to management cluster with safer error handling.
-func heartbeatBlock(controllerURL string) {
+func heartbeatBlock(controllerURL, aws_region string) {
 	if controllerURL == "" {
 		log.Fatal("CONTROLLER_URL not set")
 	}
-	interval := 5 * time.Second
+	interval := 1 * time.Second
 
 	nodeName, err := os.Hostname()
 	if err != nil {
@@ -700,6 +702,15 @@ func heartbeatBlock(controllerURL string) {
 			cpuUsage = cpuPercent[0]
 		}
 
+		// check if the cluster is on AWS
+		// if aws_region != "" {
+		// 	nodeName = fmt.Sprintf("%s.%s.compute.internal", nodeName, aws_region)
+		// }
+
+		if aws_region != "" && !strings.Contains(nodeName, ".compute.internal") {
+			nodeName = fmt.Sprintf("%s.%s.compute.internal", nodeName, aws_region)
+		}
+
 		hb := HeartbeatPayload{
 			Node:      nodeName,
 			IPAddress: nodeIP,
@@ -727,7 +738,8 @@ func heartbeatBlock(controllerURL string) {
 			log.Printf("failed to send heartbeat: %v", err)
 		} else {
 			resp.Body.Close()
-			log.Printf("heartbeat sent: %s %s", hb.Node, hb.IPAddress, hb.ClusterName)
+			log.Printf("heartbeat sent: node=%s ip=%s cluster=%s", hb.Node, hb.IPAddress, hb.ClusterName)
+
 		}
 
 		time.Sleep(interval)
