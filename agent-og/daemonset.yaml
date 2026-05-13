@@ -1,8 +1,13 @@
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: checkpoint-agent
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: checkpoint-agent
-  namespace: kube-system
+  namespace: checkpoint-agent
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -20,7 +25,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: checkpoint-agent
-    namespace: kube-system
+    namespace: checkpoint-agent
 roleRef:
   kind: ClusterRole
   name: checkpoint-agent
@@ -30,18 +35,18 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: checkpoint-agent-credentials
-  namespace: kube-system
+  namespace: checkpoint-agent
 type: Opaque
-data:
-  # Generate values with: echo -n 'your-value' | base64
-  MINIO_ACCESS_KEY: <base64-encoded-access-key>
-  MINIO_SECRET_KEY: <base64-encoded-secret-key>
+stringData:
+  MINIO_ACCESS_KEY: your-access-key
+  MINIO_SECRET_KEY: your-secret-key
 ---
+
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: checkpoint-agent
-  namespace: kube-system
+  namespace: checkpoint-agent
 spec:
   selector:
     matchLabels:

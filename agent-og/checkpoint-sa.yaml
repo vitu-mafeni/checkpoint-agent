@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: checkpoint-sa
+  namespace: checkpoint-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: checkpoint-role
+  namespace: checkpoint-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods/checkpoint"]
+    verbs: ["patch", "create", "update", "proxy"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: checkpoint-rolebinding
+  namespace: checkpoint-agent
+subjects:
+  - kind: ServiceAccount
+    name: checkpoint-sa
+    namespace: checkpoint-agent
+roleRef:
+  kind: Role
+  name: checkpoint-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: checkpoint-sa-nodes-checkpoint
+rules:
+  - apiGroups: [""]
+    resources: ["nodes/checkpoint"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["nodes/proxy"]
+    verbs: ["create", "get"]
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: checkpoint-sa-nodes-checkpoint-binding
+subjects:
+  - kind: ServiceAccount
+    name: checkpoint-sa
+    namespace: checkpoint-agent
+roleRef:
+  kind: ClusterRole
+  name: checkpoint-sa-nodes-checkpoint
+  apiGroup: rbac.authorization.k8s.io
