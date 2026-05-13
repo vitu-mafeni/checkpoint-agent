@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install dependencies
 RUN apk add --no-cache git ca-certificates
@@ -35,8 +35,6 @@ VOLUME ["/var/lib/kubelet/checkpoints"]
 # Environment variables (can be overridden in the DaemonSet)
 ENV CHECKPOINT_DIR=/var/lib/kubelet/checkpoints \
     MINIO_ENDPOINT=minio:9000 \
-    MINIO_ACCESS_KEY=minio-access-key \
-    MINIO_SECRET_KEY=minio-secret-key \
     MINIO_BUCKET=checkpoints \
     PULL_INTERVAL=5m
 
