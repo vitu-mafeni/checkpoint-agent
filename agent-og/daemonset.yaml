@@ -38,8 +38,8 @@ metadata:
   namespace: checkpoint-agent
 type: Opaque
 stringData:
-  MINIO_ACCESS_KEY: your-access-key
-  MINIO_SECRET_KEY: your-secret-key
+  MINIO_ACCESS_KEY: nephio1234
+  MINIO_SECRET_KEY: secret1234
 ---
 
 apiVersion: apps/v1
@@ -73,14 +73,14 @@ spec:
             - name: CHECKPOINT_DIR
               value: /var/lib/kubelet/checkpoints
             - name: MINIO_ENDPOINT
-              value: "52.221.201.236:32757"
+              value: "54.255.162.223:32001"
             - name: MINIO_BUCKET
               value: checkpoints
             - name: PULL_INTERVAL
               value: "5s"
             - name: CONTROLLER_URL
-              value: "http://52.221.201.236:8090/heartbeat"
-            # Remove or leave empty if not on AWS
+              value: "http://54.255.162.223:8090/heartbeat"
+            # Remove or leave empty if not on AWS 
             - name: AWS_REGION
               value: "ap-southeast-1"
             - name: MINIO_ACCESS_KEY
