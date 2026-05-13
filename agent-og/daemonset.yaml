@@ -58,8 +58,13 @@ spec:
     spec:
       serviceAccountName: checkpoint-agent
       # Remove nodeSelector to run on all nodes, or set to match your worker node label
-      nodeSelector:
-        node-role.kubernetes.io/worker: ""
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       volumes:
         - name: kubelet-checkpoints
           hostPath:
